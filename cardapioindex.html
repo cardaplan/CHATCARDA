@@ -3921,6 +3921,96 @@
             });
 
             container.innerHTML = html;
+
+            // Aplicar controle de estoque visualmente após renderizar cada card
+            try {
+                sortedCategories.forEach(categoryInfo => {
+                    const categoryKey = categoryInfo.nome_categoria;
+                    const itemsInCategory = menuData[categoryKey] || [];
+                    const sectionEl = document.getElementById(categoryKey);
+                    if (!sectionEl) return;
+                    const cards = sectionEl.querySelectorAll('.food-card');
+                    itemsInCategory.forEach((item, index) => {
+                        const cardEl = cards[index];
+                        if (!cardEl) return;
+                        aplicarControleEstoque(item, cardEl);
+                    });
+                });
+            } catch (e) {
+                console.error('Erro ao aplicar controle de estoque:', e);
+            }
+        }
+        
+        /**
+         * Aplica o controle de estoque visualmente em um card de produto.
+         *
+         * Regras:
+         * - Se controle_estoque = "Sim" e estoque_atual <= 0, mostrar rótulo "Esgotado",
+         *   desabilitar o botão de adicionar ao carrinho e impedir a abertura do modal.
+         * - Se controle_estoque = "Não" ou se as colunas não existirem no item, não faz nada.
+         * - Nenhuma alteração estrutural é feita; apenas estilos e eventos são ajustados.
+         *
+         * Observação: o decréscimo real do estoque é responsabilidade do backend
+         * quando o pedido é consolidado na planilha. Aqui apenas refletimos
+         * visualmente a indisponibilidade.
+         *
+         * @param {Object} item Dados do item vindos da planilha (aba Itens)
+         * @param {HTMLElement} cardElement Elemento do card do produto já renderizado
+         */
+        function aplicarControleEstoque(item, cardElement) {
+            try {
+                if (!item || !cardElement) return; // Fallback silencioso
+
+                // Ler campos com segurança (fallback se não existirem)
+                const controleRaw = typeof item.controle_estoque !== 'undefined' ? String(item.controle_estoque) : null;
+                const estoqueAtualRaw = typeof item.estoque_atual !== 'undefined' ? item.estoque_atual : null;
+
+                // Se as colunas não existirem, não fazer nada (comportamento atual permanece)
+                if (controleRaw === null || estoqueAtualRaw === null) return;
+
+                const controle = controleRaw.trim().toLowerCase();
+                if (controle !== 'sim') return; // Controle desativado para o item
+
+                const estoqueAtualNumero = Number(estoqueAtualRaw);
+                if (!isFinite(estoqueAtualNumero)) return; // Valor inválido: sair silenciosamente
+
+                // Caso esgotado: aplicar apenas efeitos visuais conforme especificação
+                if (estoqueAtualNumero <= 0) {
+                    // Desabilitar botão de adicionar ao carrinho no card
+                    const addBtn = cardElement.querySelector('.add-to-cart-btn');
+                    if (addBtn) {
+                        addBtn.setAttribute('disabled', 'true');
+                        addBtn.setAttribute('aria-disabled', 'true');
+                        addBtn.style.backgroundColor = '#9CA3AF'; // cinza
+                        addBtn.style.cursor = 'not-allowed';
+                        addBtn.style.opacity = '0.7';
+                        addBtn.title = 'Esgotado';
+                        // Neutraliza efeitos de hover inline para não alterar aparência
+                        addBtn.onmouseenter = null;
+                        addBtn.onmouseleave = null;
+                    }
+
+                    // Rótulo "Esgotado" no card (idempotente)
+                    if (!cardElement.querySelector('.sold-out-badge')) {
+                        const badge = document.createElement('div');
+                        badge.className = 'sold-out-badge absolute top-2 right-2 bg-red-600 text-white text-xs px-2 py-1 rounded';
+                        badge.textContent = 'Esgotado';
+                        cardElement.appendChild(badge);
+                    }
+
+                    // Impedir abertura do modal ao clicar no card (captura para bloquear onclick inline)
+                    cardElement.classList.add('opacity-90');
+                    cardElement.style.cursor = 'not-allowed';
+                    const preventOpen = function(ev) {
+                        ev.preventDefault();
+                        ev.stopImmediatePropagation();
+                        return false;
+                    };
+                    cardElement.addEventListener('click', preventOpen, true);
+                }
+            } catch (e) {
+                console.error('Erro aplicarControleEstoque:', e);
+            }
         }
         // Open product modal
         function openProductModal(productId) {
