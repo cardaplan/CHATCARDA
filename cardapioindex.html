@@ -6679,6 +6679,98 @@
                 return price > 0 ? sum + (price * item.quantity) : sum;
             }, 0);
         }
+        
+        /**
+         * Valida o pedido mínimo configurado na planilha (aba Config → checkout.pedido_minimo).
+         *
+         * Regras:
+         * - Se o valor estiver configurado e for numérico, o subtotal do carrinho
+         *   (apenas itens com preço) deve ser >= pedido_minimo.
+         * - Se não existir ou for inválido, não bloqueia o checkout.
+         * - Mostra/oculta um aviso visual antes do botão de finalizar pedido (Step 3).
+         *
+         * Observação: O valor usado é o subtotal do carrinho (sem frete),
+         * refletindo o comportamento de "pedido mínimo" sobre produtos.
+         *
+         * @param {number} totalCarrinho Subtotal atual do carrinho
+         * @returns {boolean} true para permitir continuação; false para bloquear
+         */
+        function validarPedidoMinimo(totalCarrinho) {
+            try {
+                // Buscar configuração diretamente da planilha
+                const pedidoMinRaw = typeof getConfig === 'function' ? getConfig('checkout', 'pedido_minimo', '') : '';
+                // Se não configurado, permitir fluxo normal
+                if (!pedidoMinRaw || String(pedidoMinRaw).trim() === '') {
+                    // Ocultar aviso se existir
+                    const warnEl = document.getElementById('min-order-warning');
+                    if (warnEl) warnEl.style.display = 'none';
+                    return true;
+                }
+
+                // Converter para número de forma resiliente
+                let pedidoMinimo = NaN;
+                if (typeof parsePrice === 'function') {
+                    pedidoMinimo = parsePrice(pedidoMinRaw);
+                } else {
+                    pedidoMinimo = parseFloat(String(pedidoMinRaw).replace(/[^0-9.,]/g, '').replace(',', '.'));
+                }
+
+                // Se valor inválido, não bloquear
+                if (!isFinite(pedidoMinimo) || isNaN(pedidoMinimo) || pedidoMinimo <= 0) {
+                    const warnEl = document.getElementById('min-order-warning');
+                    if (warnEl) warnEl.style.display = 'none';
+                    return true;
+                }
+
+                // Preparar mensagem de aviso
+                const mensagem = `⚠️ O pedido mínimo é de ${typeof formatCurrency === 'function' ? formatCurrency(pedidoMinimo) : 'R$ ' + pedidoMinimo.toFixed(2)}. Adicione mais itens para continuar.`;
+
+                // Garantir elemento de aviso no Step 3, antes do botão finalizar
+                const step3 = document.getElementById('checkout-step-3');
+                if (step3) {
+                    let warnEl = document.getElementById('min-order-warning');
+                    if (!warnEl) {
+                        warnEl = document.createElement('div');
+                        warnEl.id = 'min-order-warning';
+                        warnEl.className = 'p-3 rounded-lg border text-sm mb-3';
+                        warnEl.style.backgroundColor = 'rgba(245, 158, 11, 0.10)'; // âmbar claro
+                        warnEl.style.borderColor = '#F59E0B';
+                        warnEl.style.color = '#92400E';
+
+                        // Inserir imediatamente antes da linha dos botões do Step 3
+                        const finalizeBtn = step3.querySelector('button[onclick*="finalizeOrder"]');
+                        const buttonsRow = finalizeBtn ? finalizeBtn.parentElement : null;
+                        if (buttonsRow && buttonsRow.parentNode) {
+                            buttonsRow.parentNode.insertBefore(warnEl, buttonsRow);
+                        } else {
+                            step3.appendChild(warnEl);
+                        }
+                    }
+
+                    // Atualizar texto
+                    warnEl.textContent = mensagem;
+
+                    // Mostrar/ocultar conforme regra
+                    if (totalCarrinho < pedidoMinimo) {
+                        warnEl.style.display = 'block';
+                        // Feedback adicional leve (opcional)
+                        if (typeof showToast === 'function') {
+                            showToast('Pedido abaixo do mínimo', 'warning', 2500);
+                        }
+                        return false; // Bloquear continuação
+                    } else {
+                        warnEl.style.display = 'none';
+                        return true;
+                    }
+                }
+
+                // Se não encontrou Step 3 por algum motivo, não bloquear
+                return true;
+            } catch (e) {
+                console.error('Erro validarPedidoMinimo:', e);
+                return true; // Fallback seguro: nunca bloquear em caso de erro
+            }
+        }
         // Atualizar total do pedido no Step 3 (checkout) - MODIFICADO PARA CUPONS
         function updateCheckoutOrderTotal() {
             const totalElement = document.getElementById('checkout-order-total');
@@ -9711,6 +9803,17 @@
 
         // Finalize order with enhanced validation
         function finalizeOrder() {
+            // Validação de pedido mínimo (antes de qualquer outra validação de campos)
+            try {
+                const subtotalCarrinho = typeof calculateCartTotal === 'function' ? calculateCartTotal() : 0;
+                const permitido = typeof validarPedidoMinimo === 'function' ? validarPedidoMinimo(subtotalCarrinho) : true;
+                if (!permitido) {
+                    // Impedir continuação se abaixo do mínimo
+                    return;
+                }
+            } catch (e) {
+                console.error('Erro na checagem de pedido mínimo:', e);
+            }
             // Collect customer data
             const customerName = document.getElementById('customer-name').value.trim();
             const paymentMethod = document.getElementById('payment-method').value;
